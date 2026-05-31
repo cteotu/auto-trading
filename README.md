@@ -17,6 +17,25 @@
 - 🖥️ **Web Dashboard** — Real-time monitoring and control interface
 - 🔒 **Risk Management** — Position sizing, stop-loss, and exposure limits
 
+## Screenshots
+
+### Trading Control
+![Trading Control](docs/screenshots/trading-control.png)
+
+Real-time market monitoring with strategy configuration, entry signals, and trade execution controls.
+
+### Market Data
+![Market Data](docs/screenshots/market-data.png)
+
+Market list with historical results, price gap analysis, and interactive market replay charts.
+
+### Data Analysis
+![Data Analysis](docs/screenshots/data-analysis.png)
+
+Performance analytics with equity curve, daily P&L, win rate trends, and trade volume breakdown.
+
+---
+
 ## Architecture
 
 ```
