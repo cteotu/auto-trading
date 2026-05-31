@@ -32,6 +32,7 @@ export default function TopBar({
 
   const qs = qualityStatus || { collector: false, orderbook: false, price: false, network: false };
   const ss = serviceStatus || { sim: false, live: false, route: false };
+  const liveStartBlocked = !liveOn && !ss.route;
 
   return (
     <div className="topbar">
@@ -73,11 +74,21 @@ export default function TopBar({
           <span style={{ fontSize: 10, color: "var(--muted)" }}>
             <span className={`quality-tag ${ss.live ? "ok" : "warn"}`} style={{ fontSize: 9, padding: "1px 4px" }}>实盘{ss.live ? "✓" : "✗"}</span>
           </span>
+          <span style={{ fontSize: 10, color: "var(--muted)" }}>
+            <span className={`quality-tag ${ss.route ? "ok" : "warn"}`} style={{ fontSize: 9, padding: "1px 4px" }}>路线{ss.route ? "✓" : "未就绪"}</span>
+          </span>
         </div>
       </div>
       <div className="topbar-right">
         <button className={`btn ${simOn ? "success" : "primary"}`} onClick={onToggleSim}>{simOn ? "暂停模拟" : "启动模拟"}</button>
-        <button className={`btn ${liveOn ? "danger" : ""}`} onClick={onToggleLive}>{liveOn ? "暂停实盘" : "启动实盘"}</button>
+        <button
+          className={`btn ${liveOn ? "danger" : ""}`}
+          onClick={onToggleLive}
+          disabled={liveStartBlocked}
+          title={liveStartBlocked ? "实盘路线未就绪，已禁止从页面启动真实交易" : undefined}
+        >
+          {liveOn ? "暂停实盘" : liveStartBlocked ? "实盘未就绪" : "启动实盘"}
+        </button>
         <button className="btn" onClick={onRefresh}>刷新</button>
       </div>
     </div>

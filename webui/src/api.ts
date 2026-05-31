@@ -200,15 +200,26 @@ interface BackendMarketWindows {
     window_start_ts: number;
     window_end_ts: number;
     market_time: string;
-    open_price: number;
-    final_price: number;
-    final_gap: number;
+    open_price: number | null;
+    final_price: number | null;
+    final_gap: number | null;
     winner: string;
     ptb_quality: string;
     has_trade: boolean;
     trade_status: string;
     reversal: boolean;
   }>;
+}
+
+export interface BackendMissingMarkets {
+  total_expected: number;
+  total_actual: number;
+  total_missing: number;
+  today_expected: number;
+  today_actual: number;
+  today_missing: number;
+  first_window_ts?: number;
+  latest_window_ts?: number;
 }
 
 interface BackendFundTrend {
@@ -248,7 +259,7 @@ export interface FrontendMarket {
   slug: string;
   market_time: string;
   winner: string;
-  final_gap: number;
+  final_gap: number | null;
   has_trade: boolean;
   trade_status: string;
   reversal: boolean;
@@ -296,7 +307,7 @@ function mapMarket(m: BackendMarketWindows["markets"][0]): FrontendMarket {
     slug: m.slug,
     market_time: m.market_time,
     winner: m.winner || "--",
-    final_gap: m.final_gap ?? 0,
+    final_gap: m.final_gap ?? null,
     has_trade: m.has_trade,
     trade_status: m.trade_status || "",
     reversal: m.reversal,
@@ -312,6 +323,7 @@ export const api = {
   strategies: () => request<BackendStrategies>("/api/strategies"),
   wallet: () => request<BackendWallet>("/api/wallet"),
   dataQuality: () => request<BackendDataQuality>("/api/data-quality"),
+  missingMarkets: () => request<BackendMissingMarkets>("/api/missing-markets"),
 
   trades: async (page = 1, pageSize = 25): Promise<{ trades: FrontendTrade[]; total: number; page: number; pages: number }> => {
     const res = await request<BackendTradesResponse>(`/api/trades?p=${page}&ps=${pageSize}`);
@@ -345,4 +357,26 @@ export const api = {
 
   refreshBackend: () =>
     request("/api/refresh", { method: "POST", body: JSON.stringify({}) }),
+
+  marketTickData: (slug: string) =>
+    request<MarketTickData>(`/api/market-tick-data?slug=${encodeURIComponent(slug)}`).catch(() => null),
 };
+
+export interface MarketTickData {
+  slug: string;
+  open_price: number | null;
+  final_price: number | null;
+  data_points?: {
+    price: number;
+    orderbook_up: number;
+    orderbook_down: number;
+  };
+  ticks: Array<{
+    ts: number;
+    price: number | null;
+    gap: number | null;
+    up_prob: number | null;
+    down_prob: number | null;
+    volume: number;
+  }>;
+}

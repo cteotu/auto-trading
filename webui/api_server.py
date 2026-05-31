@@ -41,6 +41,7 @@ if str(T) not in sys.path: sys.path.insert(0, str(T))
 LH = {"ok": False}; LH_at = 0.0
 PRICE_CACHE = {"value": 0.0, "at": 0.0, "source": ""}
 PLATFORM_PRICE_CACHE = {}
+TICK_DATA_CACHE = {}
 LINE_COUNT_CACHE = {}
 WALLET_CACHE = {"at": 0.0, "data": None}
 SERVICE_CACHE = {}
@@ -509,6 +510,9 @@ def wallet_state():
     now = time.time()
     if WALLET_CACHE.get("data") and now - WALLET_CACHE.get("at", 0) < 30:
         return WALLET_CACHE["data"]
+    # 如果有缓存但过期，先返回旧缓存（避免阻塞）
+    if WALLET_CACHE.get("data") and now - WALLET_CACHE.get("at", 0) < 300:
+        return WALLET_CACHE["data"]
     data = _wallet_state_uncached()
     WALLET_CACHE.update({"at": now, "data": data})
     return data
@@ -565,7 +569,7 @@ def clh():
                 result[0] = {"executor":"clob_sdk","ok":False,"error":str(e)[:300]}
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        t.join(timeout=2)
+        t.join(timeout=1)
         if t.is_alive():
             LH = {"executor":"clob_sdk","ok":False,"error":"health_check_timeout"}; LH_at=now; return LH
         LH = result[0]; LH_at=now; return LH
@@ -698,7 +702,9 @@ def best_open_price(window, trades):
         v = trade_open(t)
         if v is not None:
             return v
-    return num_or_none(window.get("ptb"))
+    if quality in {"platform", "exact", "good", "close"}:
+        return num_or_none(window.get("ptb"))
+    return None
 
 def price_rows_for_window(start, end, max_rows=20000):
     path = TRUE_DIR / "price_ticks.jsonl"
@@ -1423,7 +1429,7 @@ class H(SimpleHTTPRequestHandler):
         self.j({"data": pie_data, "total": sum(reasons.values())})
 
     def do_market_tick_data(self):
-        """返回指定市场的实时tick数据（价格+盘口）"""
+        """返回指定市场的回放tick数据（带缓存）"""
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         slug = (qs.get("slug") or [""])[0]
@@ -1431,63 +1437,133 @@ class H(SimpleHTTPRequestHandler):
             self.j({"error": "missing slug"}, 400)
             return
 
-        # 读取价格数据
-        prices = []
+        # 检查缓存（60秒有效）
+        now = time.time()
+        cached = TICK_DATA_CACHE.get(slug)
+        if cached and now - cached.get("at", 0) < 60:
+            self.j(cached["data"])
+            return
+
+        windows = load_windows(500)
+        window = next((w for w in windows if w.get("slug") == slug), {})
+        trades = [t for t in read_trades() if t.get("slug") == slug or t.get("market_slug") == slug]
+        start_ts = int(window.get("window_start_ts") or (trades[0].get("window_start_ts") if trades else 0) or 0)
+        end_ts = int(window.get("window_end_ts") or (start_ts + 300 if start_ts else 0))
+
+        # 读取可靠开盘价和结算价。坏的 RTDS/PTB 估算不再回退显示，避免误导回放和交易判断。
+        open_price = best_open_price(window, trades)
+        platform_price = platform_crypto_price("BTC", start_ts, end_ts)
+        platform_open = num_or_none(platform_price.get("open_price"))
+        if platform_open is not None:
+            open_price = platform_open
+        final_price = None
+
+        # 从 resolutions 读取结算价
+        resolutions = resolution_by_slug(5000)
+        if slug in resolutions:
+            final_price = resolution_final(resolutions[slug])
+        if final_price is None:
+            final_price = num_or_none(platform_price.get("close_price"))
+        if final_price is None:
+            for t in trades:
+                final_price = final_price or trade_final(t)
+
+        # 读取价格数据（优先 slug，其次窗口时间范围；仅使用真实采集到的点）
+        prices = {}
         try:
-            for row in tail_jsonl(TRUE_DIR / "price_ticks.jsonl", 5000):
-                if row.get("slug") == slug:
-                    ts = row_ts(row)
-                    value = parse_float(row.get("value", 0))
-                    if ts and value:
-                        prices.append({
-                            "ts": int(ts * 1000),
-                            "time": datetime.fromtimestamp(ts, CN).strftime("%H:%M:%S"),
-                            "price": round(value, 2),
-                        })
+            for row in tail_jsonl(TRUE_DIR / "price_ticks.jsonl", 50000):
+                ts = 0
+                rtds_ms = parse_float(row.get("rtds_timestamp_ms", 0))
+                if rtds_ms:
+                    ts = int(rtds_ms / 1000)
+                else:
+                    ts = int(row_ts(row) or 0)
+                if not ts:
+                    continue
+                row_slug = row.get("slug")
+                in_window = bool(start_ts and end_ts and start_ts <= ts <= end_ts)
+                if row_slug and row_slug != slug:
+                    continue
+                if not row_slug and not in_window:
+                    continue
+                value = parse_float(row.get("value", 0))
+                if value:
+                    prices[ts] = value
         except Exception:
             pass
 
-        # 读取盘口数据
-        orderbook = []
+        # 读取盘口数据（up/down 是对象，不是行）
+        up_probs = {}
+        down_probs = {}
         try:
-            for row in tail_jsonl(TRUE_DIR / "orderbook_ticks.jsonl", 5000):
+            for row in tail_jsonl(TRUE_DIR / "orderbook_ticks.jsonl", 10000):
                 if row.get("slug") != slug:
                     continue
                 ts = row_ts(row)
                 if not ts:
                     continue
-                side = str(row.get("side", "")).lower()
-                bids = row.get("bids", [])
-                asks = row.get("asks", [])
-                best_bid = parse_float((bids[0] or {}).get("price", 0)) if bids else 0
-                best_ask = parse_float((asks[0] or {}).get("price", 0)) if asks else 0
-                mid = round((best_bid + best_ask) / 2, 4) if best_bid and best_ask else best_ask or best_bid
-                entry = {
-                    "ts": int(ts * 1000),
-                    "time": datetime.fromtimestamp(ts, CN).strftime("%H:%M:%S"),
-                    "side": side,
-                    "bid": best_bid,
-                    "ask": best_ask,
-                    "mid": mid,
-                }
-                if side == "up":
-                    entry["up_prob"] = mid
-                elif side == "down":
-                    entry["down_prob"] = mid
-                orderbook.append(entry)
+                ts_key = int(ts)
+
+                # up 对象
+                up_obj = row.get("up", {})
+                if isinstance(up_obj, dict):
+                    up_bid = parse_float(up_obj.get("bid1_price", 0))
+                    up_ask = parse_float(up_obj.get("ask1_price", 0))
+                    if up_bid and up_ask:
+                        up_probs[ts_key] = round((up_bid + up_ask) / 2, 4)
+
+                # down 对象
+                down_obj = row.get("down", {})
+                if isinstance(down_obj, dict):
+                    down_bid = parse_float(down_obj.get("bid1_price", 0))
+                    down_ask = parse_float(down_obj.get("ask1_price", 0))
+                    if down_bid and down_ask:
+                        down_probs[ts_key] = round((down_bid + down_ask) / 2, 4)
         except Exception:
             pass
 
-        prices.sort(key=lambda x: x["ts"])
-        orderbook.sort(key=lambda x: x["ts"])
+        # 合并所有时间戳
+        all_ts = sorted(set(list(prices.keys()) + list(up_probs.keys()) + list(down_probs.keys())))
 
-        self.j({
+        ticks = []
+        last_price = None
+        last_up = None
+        last_down = None
+        for ts in all_ts:
+            if ts in prices:
+                last_price = prices.get(ts)
+            if ts in up_probs:
+                last_up = up_probs.get(ts)
+            if ts in down_probs:
+                last_down = down_probs.get(ts)
+            price = last_price
+            up = last_up
+            down = last_down
+            gap = round(price - open_price, 2) if price is not None and open_price else None
+            ticks.append({
+                "ts": ts,
+                "price": round(price, 2) if price is not None else None,
+                "gap": gap,
+                "up_prob": round(up, 4) if up is not None else None,
+                "down_prob": round(down, 4) if down is not None else None,
+                "volume": 0,
+            })
+
+        result = {
             "slug": slug,
-            "prices": prices[-200:],  # 最近200个点
-            "orderbook": orderbook[-200:],
-            "price_count": len(prices),
-            "orderbook_count": len(orderbook),
-        })
+            "open_price": open_price,
+            "final_price": final_price,
+            "ticks": ticks,
+            "data_points": {
+                "price": len(prices),
+                "orderbook_up": len(up_probs),
+                "orderbook_down": len(down_probs),
+            },
+        }
+
+        # 写入缓存
+        TICK_DATA_CACHE[slug] = {"at": now, "data": result}
+        self.j(result)
 
     def do_missing_markets(self):
         """计算缺失市场数：从第一条记录开始，每5分钟一个窗口，减去实际记录数"""

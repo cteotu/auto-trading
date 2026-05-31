@@ -7,7 +7,7 @@ import MarketDataPage from "./pages/MarketDataPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import UserCenterPage from "./pages/UserCenterPage";
 import { api } from "./api";
-import type { FrontendTrade, FrontendMarket } from "./api";
+import type { FrontendTrade, FrontendMarket, BackendMissingMarkets } from "./api";
 import type { StrategySlot } from "./types";
 
 interface BackendStrategies {
@@ -69,6 +69,7 @@ export default function App() {
   const [dataQuality, setDataQuality] = useState<any>(null);
   const [fundTrend, setFundTrend] = useState<any>({ data: [], initial: 100 });
   const [skipReasons, setSkipReasons] = useState<any>({ data: [], total: 0 });
+  const [marketStats, setMarketStats] = useState<BackendMissingMarkets | null>(null);
 
   // ── Fast polling (5s): status + trades only ──
   const fetchingRef = useRef(false);
@@ -94,13 +95,11 @@ export default function App() {
       setTickerUp(t.up_price || 0);
       setTickerDown(t.down_price || 0);
 
-      // Update service status
-      setSimOn(stat.sim?.service_active && !stat.stats?.sim ? false : stat.stats?.sim?.trade_count > 0);
-      setServiceStatus({
+      // Fast status should not overwrite live route readiness; /api/safety owns that truth.
+      setServiceStatus((prev) => ({
+        ...prev,
         sim: stat.sim?.service_active || false,
-        live: stat.live?.service_active || false,
-        route: true,
-      });
+      }));
 
       // Update trades
       setTrades(tradesRes.trades);
@@ -131,14 +130,13 @@ export default function App() {
   // ── Slow polling (30s): summary, strategies, wallet ──
   const refreshSlow = useCallback(async () => {
     try {
-      const [safetyRes, summaryRes, stratRes, walletRes, trendRes, reasonsRes, statusRes] = await Promise.all([
+      const [safetyRes, summaryRes, stratRes, walletRes, statusRes, missingRes] = await Promise.all([
         api.safety().catch(() => null),
         api.summary().catch(() => null),
         api.strategies().catch(() => null),
         api.wallet().catch(() => null),
-        api.fundTrend().catch(() => ({ data: [], initial: 100 })),
-        api.skipReasons().catch(() => ({ data: [], total: 0 })),
         api.status().catch(() => null),
+        api.missingMarkets().catch(() => null),
       ]);
 
       if (safetyRes) {
@@ -181,13 +179,27 @@ export default function App() {
           newSlots[Number(id)] = backendToFrontendSlot(s);
         }
         setSlots(newSlots);
+        const active = Number(stratRes.active_strategy || 1);
+        setActiveSlots({ [active]: true });
       }
 
       if (walletRes) setWallet(walletRes);
+      if (missingRes) setMarketStats(missingRes);
+    } catch (e) {
+      console.error("refreshSlow error:", e);
+    }
+  }, []);
+
+  const refreshAnalytics = useCallback(async () => {
+    try {
+      const [trendRes, reasonsRes] = await Promise.all([
+        api.fundTrend().catch(() => ({ data: [], initial: 100 })),
+        api.skipReasons().catch(() => ({ data: [], total: 0 })),
+      ]);
       setFundTrend(trendRes);
       setSkipReasons(reasonsRes);
     } catch (e) {
-      console.error("refreshSlow error:", e);
+      console.error("refreshAnalytics error:", e);
     }
   }, []);
 
@@ -197,6 +209,13 @@ export default function App() {
       api.marketWindows(200).then(setMarkets).catch(console.error);
     }
   }, [activeTab, markets.length]);
+
+  useEffect(() => {
+    if (activeTab !== "analytics") return;
+    refreshAnalytics();
+    const id = setInterval(() => refreshAnalytics(), 60000);
+    return () => clearInterval(id);
+  }, [activeTab, refreshAnalytics]);
 
   // ── Polling setup ──
   useEffect(() => {
@@ -245,17 +264,30 @@ export default function App() {
     }
   }, [liveOn]);
 
-  const toggleSlot = useCallback((n: number) => {
-    setActiveSlots((prev) => {
-      const next = { ...prev };
-      if (next[n]) delete next[n]; else next[n] = true;
-      return next;
-    });
+  const toggleSlot = useCallback(async (n: number) => {
+    try {
+      await api.switchStrategy(String(n));
+      setActiveSlots({ [n]: true });
+    } catch (e) {
+      console.error("switchStrategy error:", e);
+    }
   }, []);
 
-  const updateSlot = useCallback((n: number, data: Partial<StrategySlot>) => {
-    setSlots((prev) => ({ ...prev, [n]: { ...prev[n], ...data } }));
-  }, []);
+  const updateSlot = useCallback(async (n: number, data: Partial<StrategySlot>) => {
+    const nextSlot = { ...slots[n], ...data };
+    setSlots((prev) => ({ ...prev, [n]: nextSlot }));
+    try {
+      await api.updateStrategy(String(n), nextSlot.name, {
+        entry_second: nextSlot.entry,
+        gap_threshold: nextSlot.gap,
+        min_buy_price: nextSlot.prob,
+        bet_fraction: nextSlot.fundParam,
+        cooldown_seconds: nextSlot.cool,
+      });
+    } catch (e) {
+      console.error("updateStrategy error:", e);
+    }
+  }, [slots]);
 
   return (
     <div className="app-layout">
@@ -266,10 +298,10 @@ export default function App() {
         marketSlug={marketSlug} marketTime={marketTime}
         qualityStatus={qualityStatus} serviceStatus={serviceStatus}
         onToggleSim={toggleSim} onToggleLive={toggleLive}
-        onRefresh={() => { refreshFast(); refreshQuality(); refreshSlow(); }}
+        onRefresh={() => { refreshFast(); refreshQuality(); refreshSlow(); if (activeTab === "analytics") refreshAnalytics(); }}
       />
       <div className="app-content">
-        <KPIRow summary={summary} fundTrend={fundTrend} />
+        <KPIRow summary={summary} fundTrend={fundTrend} marketStats={marketStats} />
         <div className="tab-nav" style={{ marginBottom: 0 }}>
           {[
             { key: "trade", label: "📊 交易控制" },
@@ -281,11 +313,13 @@ export default function App() {
               onClick={() => setActiveTab(t.key)}>{t.label}</button>
           ))}
         </div>
-        <div className="app-main">
-          <div className="left-panel">
-            <StrategyPanel slots={slots} activeSlots={activeSlots}
-              onToggleSlot={toggleSlot} onUpdateSlot={updateSlot} />
-          </div>
+        <div className={`app-main ${activeTab === "trade" ? "" : "full-main"}`}>
+          {activeTab === "trade" && (
+            <div className="left-panel">
+              <StrategyPanel slots={slots} activeSlots={activeSlots}
+                onToggleSlot={toggleSlot} onUpdateSlot={updateSlot} />
+            </div>
+          )}
           <div className="right-panel">
             {activeTab === "trade" && <TradeTable trades={trades} total={tradesTotal} mode={simOn ? "sim" : liveOn ? "live" : "none"} />}
             {activeTab === "market" && <MarketDataPage markets={markets} />}

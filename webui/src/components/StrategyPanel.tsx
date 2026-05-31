@@ -21,8 +21,9 @@ export default function StrategyPanel({ slots, activeSlots, onToggleSlot, onUpda
   const firstActive = activeKeys.length > 0 ? slots[activeKeys[0]] : null;
 
   const openModal = () => {
-    setEditSlot(1);
-    setEditForm({ ...slots[1] });
+    const n = activeKeys[0] || 1;
+    setEditSlot(n);
+    setEditForm({ ...slots[n] });
     setShowModal(true);
   };
 
@@ -42,19 +43,20 @@ export default function StrategyPanel({ slots, activeSlots, onToggleSlot, onUpda
           <button className="btn" onClick={openModal}>编辑</button>
         </div>
         <div className="card-body">
-          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+          <div className="strategy-slot-list">
             {[1, 2, 3, 4, 5].map((n) => (
               <button
                 key={n}
-                className={`btn ${activeSlots[n] ? "active" : ""}`}
+                className={`btn strategy-btn ${activeSlots[n] ? "active" : ""}`}
                 onClick={() => onToggleSlot(n)}
               >
-                {cleanName(slots[n].name)}
+                <span>策略 {n}</span>
+                <b>{cleanName(slots[n].name)}</b>
               </button>
             ))}
           </div>
           <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
-            已选择 <span style={{ color: "var(--text)", fontWeight: 700 }}>{activeKeys.length}</span> 个策略同时执行
+            当前后端执行策略：<span style={{ color: "var(--text)", fontWeight: 700 }}>{firstActive ? cleanName(firstActive.name) : "未选择"}</span>
           </div>
           <div className="params-grid">
             <div className="param">
@@ -83,7 +85,7 @@ export default function StrategyPanel({ slots, activeSlots, onToggleSlot, onUpda
             </div>
           </div>
           <div style={{ borderTop: "1px solid var(--line)", marginTop: 10, paddingTop: 10 }}>
-            <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>组合策略</div>
+            <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>当前策略参数</div>
             <div style={{
               fontSize: 11, color: "var(--text)", padding: "6px 8px",
               background: "var(--chip)", border: "1px solid var(--line)", borderRadius: 6,
@@ -91,7 +93,7 @@ export default function StrategyPanel({ slots, activeSlots, onToggleSlot, onUpda
               {activeKeys.length === 0 ? (
                 <div style={{ color: "var(--muted)" }}>未选择任何策略</div>
               ) : (
-                activeKeys.map((n) => {
+                activeKeys.slice(0, 1).map((n) => {
                   const s = slots[n];
                   return (
                     <div key={n} style={{ marginBottom: 2 }}>

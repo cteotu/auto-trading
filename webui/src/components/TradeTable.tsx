@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import type { FrontendTrade } from "../api";
 
-const DEFAULT_TPP = 50;
+const DEFAULT_TPP = 20;
 
 interface Props {
   trades: FrontendTrade[];
@@ -99,7 +99,7 @@ export default function TradeTable({ trades, total, mode }: Props) {
     <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
       <div className="card-header">
         <div className="card-title">
-          交易记录 ({filtered.length}/{total})
+          交易记录（最近{filtered.length}条 / 全量{total}）
           {hasFilters && <span style={{ color: "var(--accent)", fontSize: 10, marginLeft: 6 }}>已筛选</span>}
         </div>
         <div style={{ display: "flex", gap: 4, position: "relative" }}>
@@ -159,8 +159,8 @@ export default function TradeTable({ trades, total, mode }: Props) {
               <th style={{ width: 88 }}>结算结果</th>
               <th style={{ width: 60 }}>概率</th>
               <th style={{ width: 72 }}>金额</th>
-              <th style={{ width: 72 }}>手续费</th>
-              <th style={{ width: 62 }}>入场</th>
+              <th style={{ width: 52 }}>手续费</th>
+              <th style={{ width: 52 }}>入场</th>
               <th style={{ width: 76 }}>盈亏</th>
               <th style={{ width: 68 }}>盈亏率</th>
               <th>说明</th>
@@ -171,13 +171,13 @@ export default function TradeTable({ trades, total, mode }: Props) {
               <tr key={i} className={rowClass(t.status)}>
                 <td>{statusBadge(t.status)}</td>
                 <td><span className={`badge ${t.mode === "live" ? "live-badge" : "skip"}`}>{t.mode === "live" ? "实盘" : "模拟"}</span></td>
-                <td style={{ fontFamily: "JetBrains Mono", fontSize: 11, letterSpacing: "-0.02em" }}>{t.time}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums", fontSize: 11, letterSpacing: "-0.02em" }}>{t.time}</td>
                 <td><span className={`badge ${t.dir === "Up" ? "up" : "down"}`}>{t.dir}</span></td>
-                <td style={{ fontFamily: "JetBrains Mono" }}>${typeof t.open === "number" ? t.open.toLocaleString() : t.open}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }}>${typeof t.btc === "number" ? t.btc.toLocaleString() : t.btc}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }}>{t.settle ? `$${Number(t.settle).toLocaleString()}` : dv("--")}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }} className={Number(t.gap) >= 0 ? "good" : "bad"}>{Number(t.gap) >= 0 ? "+" : ""}{t.gap}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }} className={Number(t.settle_gap) > 0 ? "good" : Number(t.settle_gap) < 0 ? "bad" : ""}>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }}>${typeof t.open === "number" ? t.open.toLocaleString() : t.open}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }}>${typeof t.btc === "number" ? t.btc.toLocaleString() : t.btc}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }}>{t.settle ? `$${Number(t.settle).toLocaleString()}` : dv("--")}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }} className={Number(t.gap) >= 0 ? "good" : "bad"}>{Number(t.gap) >= 0 ? "+" : ""}{t.gap}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }} className={Number(t.settle_gap) > 0 ? "good" : Number(t.settle_gap) < 0 ? "bad" : ""}>
                   {t.settle_gap === "--" ? dv("--") : `${Number(t.settle_gap) >= 0 ? "+" : ""}${t.settle_gap}`}
                 </td>
                 <td>
@@ -185,13 +185,13 @@ export default function TradeTable({ trades, total, mode }: Props) {
                     <span className={`badge ${t.winner === t.dir ? "won" : "lost"}`}>{t.winner} {t.winner === t.dir ? "赢" : "输"}</span>
                   )}
                 </td>
-                <td style={{ fontFamily: "JetBrains Mono", fontSize: 11 }}>{typeof t.prob === "number" ? t.prob.toFixed(2) : t.prob}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }}>{t.amount === 0 || t.amount === "--" ? dv("--") : `$${Number(t.amount).toFixed(2)}`}</td>
-                <td style={{ fontFamily: "JetBrains Mono", color: "var(--muted)" }}>{dv(t.fee)}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums", fontSize: 11 }}>{typeof t.prob === "number" ? t.prob.toFixed(2) : t.prob}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }}>{t.amount === 0 || t.amount === "--" ? dv("--") : `$${Number(t.amount).toFixed(2)}`}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums", color: "var(--muted)" }}>{dv(t.fee)}</td>
                 <td><span style={String(t.entry).includes("T-1s") ? { color: "var(--bad)" } : {}}>{t.entry}</span></td>
-                <td style={{ fontFamily: "JetBrains Mono" }} className={String(t.pnl).startsWith("+") ? "good" : String(t.pnl).startsWith("-") ? "bad" : ""}>{dv(typeof t.pnl === "number" ? (t.pnl >= 0 ? "+" : "") + t.pnl.toFixed(2) : t.pnl)}</td>
-                <td style={{ fontFamily: "JetBrains Mono" }} className={String(t.ret).startsWith("+") ? "good" : String(t.ret).startsWith("-") ? "bad" : ""}>{dv(t.ret)}</td>
-                <td style={{ color: t.skip ? "var(--warn)" : "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>{t.skip || dv("--")}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }} className={String(t.pnl).startsWith("+") ? "good" : String(t.pnl).startsWith("-") ? "bad" : ""}>{dv(typeof t.pnl === "number" ? (t.pnl >= 0 ? "+" : "") + t.pnl.toFixed(2) : t.pnl)}</td>
+                <td style={{ fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" }} className={String(t.ret).startsWith("+") ? "good" : String(t.ret).startsWith("-") ? "bad" : ""}>{dv(t.ret)}</td>
+                <td style={{ color: t.skip ? "var(--warn)" : "var(--muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{t.skip || dv("--")}</td>
               </tr>
             ))}
           </tbody>
@@ -206,6 +206,7 @@ export default function TradeTable({ trades, total, mode }: Props) {
         <span style={{ fontSize: 10, color: "var(--muted)", margin: "0 8px" }}>{page}/{totalPages}</span>
         <select value={tpp} onChange={(e) => { setTpp(Number(e.target.value)); setPage(1); }}
           style={{ fontSize: 10, padding: "2px 4px", background: "var(--chip)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 4 }}>
+          <option value={20}>20条/页</option>
           <option value={25}>25条/页</option>
           <option value={50}>50条/页</option>
           <option value={100}>100条/页</option>
