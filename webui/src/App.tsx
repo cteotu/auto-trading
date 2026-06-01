@@ -7,7 +7,7 @@ import MarketDataPage from "./pages/MarketDataPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import UserCenterPage from "./pages/UserCenterPage";
 import { api } from "./api";
-import type { FrontendTrade, FrontendMarket, BackendMissingMarkets } from "./api";
+import type { FrontendTrade, FrontendMarket, BackendMissingMarkets, BackendMarketIntegrity } from "./api";
 import type { StrategySlot } from "./types";
 
 interface BackendStrategies {
@@ -70,6 +70,7 @@ export default function App() {
   const [fundTrend, setFundTrend] = useState<any>({ data: [], initial: 100 });
   const [skipReasons, setSkipReasons] = useState<any>({ data: [], total: 0 });
   const [marketStats, setMarketStats] = useState<BackendMissingMarkets | null>(null);
+  const [marketIntegrity, setMarketIntegrity] = useState<BackendMarketIntegrity | null>(null);
 
   // ── Fast polling (5s): status + trades only ──
   const fetchingRef = useRef(false);
@@ -130,13 +131,14 @@ export default function App() {
   // ── Slow polling (30s): summary, strategies, wallet ──
   const refreshSlow = useCallback(async () => {
     try {
-      const [safetyRes, summaryRes, stratRes, walletRes, statusRes, missingRes] = await Promise.all([
+      const [safetyRes, summaryRes, stratRes, walletRes, statusRes, missingRes, integrityRes] = await Promise.all([
         api.safety().catch(() => null),
         api.summary().catch(() => null),
         api.strategies().catch(() => null),
         api.wallet().catch(() => null),
         api.status().catch(() => null),
         api.missingMarkets().catch(() => null),
+        api.marketIntegrity("", 1, 60).catch(() => null),
       ]);
 
       if (safetyRes) {
@@ -185,6 +187,7 @@ export default function App() {
 
       if (walletRes) setWallet(walletRes);
       if (missingRes) setMarketStats(missingRes);
+      if (integrityRes) setMarketIntegrity(integrityRes);
     } catch (e) {
       console.error("refreshSlow error:", e);
     }
@@ -322,7 +325,7 @@ export default function App() {
           )}
           <div className="right-panel">
             {activeTab === "trade" && <TradeTable trades={trades} total={tradesTotal} mode={simOn ? "sim" : liveOn ? "live" : "none"} />}
-            {activeTab === "market" && <MarketDataPage markets={markets} />}
+            {activeTab === "market" && <MarketDataPage markets={markets} integrity={marketIntegrity} />}
             {activeTab === "analytics" && <AnalyticsPage summary={summary} fundTrend={fundTrend} skipReasons={skipReasons} />}
             {activeTab === "user" && <UserCenterPage wallet={wallet} dataQuality={dataQuality} />}
           </div>

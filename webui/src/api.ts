@@ -220,6 +220,52 @@ export interface BackendMissingMarkets {
   today_missing: number;
   first_window_ts?: number;
   latest_window_ts?: number;
+  complete?: number;
+  partial?: number;
+  abnormal?: number;
+  unsettled?: number;
+  usable_for_backtest?: number;
+  today_complete?: number;
+  today_partial?: number;
+  today_abnormal?: number;
+  today_unsettled?: number;
+  generated_at?: string;
+  refreshing?: boolean;
+}
+
+export interface MarketIntegrityRow {
+  slug: string;
+  window_start_ts: number;
+  window_end_ts: number;
+  market_time: string;
+  status: "complete" | "partial" | "missing" | "abnormal" | "unsettled";
+  usable_for_backtest: boolean;
+  reasons: string[];
+  open_price: number | null;
+  open_source: string;
+  final_price: number | null;
+  final_source: string;
+  final_gap: number | null;
+  winner: string;
+  ptb_quality: string;
+  orderbook_ticks: number;
+  orderbook_last120: number;
+  orderbook_last25: number;
+  price_ticks: number;
+  trade_rows: number;
+}
+
+export interface BackendMarketIntegrity {
+  summary: BackendMissingMarkets & {
+    reason_counts?: Record<string, number>;
+    complete_time_range?: { first: string; last: string };
+  };
+  rows: MarketIntegrityRow[];
+  total: number;
+  page: number;
+  pages: number;
+  per_page: number;
+  refreshing?: boolean;
 }
 
 interface BackendFundTrend {
@@ -324,6 +370,8 @@ export const api = {
   wallet: () => request<BackendWallet>("/api/wallet"),
   dataQuality: () => request<BackendDataQuality>("/api/data-quality"),
   missingMarkets: () => request<BackendMissingMarkets>("/api/missing-markets"),
+  marketIntegrity: (status = "", page = 1, pageSize = 100) =>
+    request<BackendMarketIntegrity>(`/api/market-integrity?p=${page}&ps=${pageSize}${status ? `&status=${encodeURIComponent(status)}` : ""}`),
 
   trades: async (page = 1, pageSize = 25): Promise<{ trades: FrontendTrade[]; total: number; page: number; pages: number }> => {
     const res = await request<BackendTradesResponse>(`/api/trades?p=${page}&ps=${pageSize}`);

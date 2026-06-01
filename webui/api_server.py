@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-import json, time, sys, subprocess, requests, os
+import json, time, sys, subprocess, requests, os, threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from urllib.parse import parse_qs, urlparse
+
+try:
+    import market_integrity
+except Exception:
+    market_integrity = None
 
 BASE = Path(r"/mnt/c/Users/yyq/Desktop/自动交易")
 if os.name == "nt":
@@ -47,6 +52,33 @@ WALLET_CACHE = {"at": 0.0, "data": None}
 SERVICE_CACHE = {}
 SAFETY_CACHE = {"at": 0.0, "data": None}
 BRIDGE_CACHE = {"at": 0.0, "ok": False}
+INTEGRITY_REFRESH = {"running": False, "last_started": 0.0}
+
+def maybe_refresh_integrity(max_age_seconds=300):
+    if market_integrity is None:
+        return False
+    try:
+        path = market_integrity.SUMMARY_PATH
+        stale = (not path.exists()) or (time.time() - path.stat().st_mtime > max_age_seconds)
+    except Exception:
+        stale = True
+    if not stale or INTEGRITY_REFRESH.get("running"):
+        return False
+    if time.time() - INTEGRITY_REFRESH.get("last_started", 0) < 60:
+        return False
+
+    def _run():
+        try:
+            market_integrity.generate()
+        except Exception:
+            pass
+        finally:
+            INTEGRITY_REFRESH["running"] = False
+
+    INTEGRITY_REFRESH["running"] = True
+    INTEGRITY_REFRESH["last_started"] = time.time()
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 def rj(p):
     if not p.exists(): return {}
@@ -971,6 +1003,7 @@ class H(SimpleHTTPRequestHandler):
         elif p=="/api/fund-trend": self.do_fund_trend()
         elif p=="/api/skip-reasons": self.do_skip_reasons()
         elif p.startswith("/api/market-tick-data"): self.do_market_tick_data()
+        elif p.startswith("/api/market-integrity"): self.do_market_integrity()
         elif p=="/api/missing-markets": self.do_missing_markets()
         else:
             if "." not in Path(p.split("?",1)[0]).name:
@@ -1565,7 +1598,61 @@ class H(SimpleHTTPRequestHandler):
         TICK_DATA_CACHE[slug] = {"at": now, "data": result}
         self.j(result)
 
+    def do_market_integrity(self):
+        if market_integrity is None:
+            self.j({
+                "summary": {},
+                "rows": [],
+                "total": 0,
+                "page": 1,
+                "pages": 1,
+                "per_page": 100,
+                "error": "market_integrity_module_unavailable",
+            })
+            return
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        try:
+            page = max(1, int((qs.get("p") or ["1"])[0]))
+        except Exception:
+            page = 1
+        try:
+            per_page = min(500, max(1, int((qs.get("ps") or ["100"])[0])))
+        except Exception:
+            per_page = 100
+        status = (qs.get("status") or [""])[0]
+        refreshing = maybe_refresh_integrity()
+        summary = market_integrity.read_summary()
+        rows = market_integrity.read_rows(per_page, status, page)
+        self.j({"summary": summary, "refreshing": refreshing or INTEGRITY_REFRESH.get("running", False), **rows})
+
     def do_missing_markets(self):
+        if market_integrity is not None:
+            refreshing = maybe_refresh_integrity()
+            summary = market_integrity.read_summary()
+            if summary:
+                self.j({
+                    "total_expected": summary.get("total_expected", 0),
+                    "total_actual": summary.get("total_actual", 0),
+                    "total_missing": summary.get("total_missing", 0),
+                    "today_expected": summary.get("today_expected", 0),
+                    "today_actual": summary.get("today_actual", 0),
+                    "today_missing": summary.get("today_missing", 0),
+                    "first_window_ts": summary.get("first_window_ts"),
+                    "latest_window_ts": summary.get("latest_window_ts"),
+                    "complete": summary.get("complete", 0),
+                    "partial": summary.get("partial", 0),
+                    "abnormal": summary.get("abnormal", 0),
+                    "unsettled": summary.get("unsettled", 0),
+                    "usable_for_backtest": summary.get("usable_for_backtest", 0),
+                    "today_complete": summary.get("today_complete", 0),
+                    "today_partial": summary.get("today_partial", 0),
+                    "today_abnormal": summary.get("today_abnormal", 0),
+                    "today_unsettled": summary.get("today_unsettled", 0),
+                    "generated_at": summary.get("generated_at", ""),
+                    "refreshing": refreshing or INTEGRITY_REFRESH.get("running", False),
+                })
+                return
         """计算缺失市场数：从第一条记录开始，每5分钟一个窗口，减去实际记录数"""
         # 加载所有窗口（去重）
         rows_by_slug = {}

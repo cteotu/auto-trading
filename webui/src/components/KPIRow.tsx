@@ -34,6 +34,15 @@ interface Props {
     today_expected: number;
     today_actual: number;
     today_missing: number;
+    complete?: number;
+    partial?: number;
+    abnormal?: number;
+    unsettled?: number;
+    usable_for_backtest?: number;
+    today_complete?: number;
+    today_partial?: number;
+    today_abnormal?: number;
+    today_unsettled?: number;
   } | null;
 }
 
@@ -54,6 +63,13 @@ export default function KPIRow({ summary, fundTrend, marketStats }: Props) {
   const todayMarkets = marketStats?.today_actual ?? 0;
   const todayExpected = marketStats?.today_expected ?? 0;
   const todayMissing = marketStats?.today_missing ?? 0;
+  const completeMarkets = marketStats?.complete ?? 0;
+  const partialMarkets = marketStats?.partial ?? 0;
+  const abnormalMarkets = marketStats?.abnormal ?? 0;
+  const unsettledMarkets = marketStats?.unsettled ?? 0;
+  const usableMarkets = marketStats?.usable_for_backtest ?? completeMarkets;
+  const todayComplete = marketStats?.today_complete ?? 0;
+  const todayAbnormal = marketStats?.today_abnormal ?? 0;
 
   return (
     <div className="kpi-row">
@@ -67,16 +83,17 @@ export default function KPIRow({ summary, fundTrend, marketStats }: Props) {
       <div className="kpi orange">
         <div className="label">今日市场</div>
         <div className="value">{todayMarkets || "--"}</div>
-        <div className="sub">预期 {todayExpected || "--"} · 缺失 {todayMissing}</div>
+        <div className="sub">完整 {todayComplete} · 异常 {todayAbnormal} · 缺失 {todayMissing}/{todayExpected || "--"}</div>
       </div>
       {/* 3. 今日成交 */}
       <div className="kpi cyan">
-        <div className="label">今日成交</div>
+        <div className="label">数据完整性</div>
         <div className="split-row">
-          <div className="split-item"><div className="sl">盈利</div><div className="sv good">{todayWins}</div></div>
-          <div className="split-item"><div className="sl">亏损</div><div className="sv bad">{todayLosses}</div></div>
-          <div className="split-item"><div className="sl">跳过</div><div className="sv" style={{ color: "var(--muted)" }}>{todaySkipped}</div></div>
+          <div className="split-item"><div className="sl">完整</div><div className="sv good">{completeMarkets}</div></div>
+          <div className="split-item"><div className="sl">残缺</div><div className="sv warn">{partialMarkets}</div></div>
+          <div className="split-item"><div className="sl">异常</div><div className="sv bad">{abnormalMarkets}</div></div>
         </div>
+        <div className="sub">可回测 {usableMarkets} · 未结算 {unsettledMarkets}</div>
       </div>
       {/* 4. 今日盈亏 */}
       <div className="kpi green">
