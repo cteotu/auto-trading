@@ -1,0 +1,8 @@
+# requirements.txt
+websocket-client
+requests
+python-dotenv
+numpy
+pandas
+flask
+flask-cors
