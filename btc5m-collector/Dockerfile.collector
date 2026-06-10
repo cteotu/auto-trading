@@ -1,0 +1,17 @@
+# Collector için Dockerfile.collector
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+FROM python:3.11-slim
+WORKDIR /app
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY btc5m-collector/ ./btc5m-collector/
+COPY runtime/ ./runtime/
+
+ENV PYTHONPATH=/app
+WORKDIR /app/btc5m-collector
+
+CMD ["python", "collect.py"]
